@@ -1,24 +1,38 @@
-from flask import Flask, render_template, request, make_response
-from flask_socketio import SocketIO, emit
+# from flask import Flask, render_template, request, make_response
+from fastapi import FastAPI, Request, Cookie
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles imoprt StaticFiles
+from fastapi.templating import Jinja2Templates
+
+# from flask_socketio import SocketIO, emit
+from fastapi_socketio import SocketManager
+
+
 import random, string, collections, time
-from fastcore.utils import *
 from urllib.parse import urlparse
-from gevent.pywsgi import WSGIServer
 
-app = Flask(__name__)
-socketio = SocketIO(app)
-sid2student, student2color, class2students  = dict(), dict(), collections.defaultdict(lambda: set())
+app = FastAPI()
+socketio = SocketManager(app)
 
-@app.route('/')
-def root(): return render_template('howto.html', url=f'https://{urlparse(request.base_url).hostname}')
+templates = Jinja2Templates(directory="templates")
 
-@app.route('/<class_id>')
-def student_interface(class_id):
-    student_id = request.cookies.get('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
+sid2student = dict()
+student2color = dict()
+class2students = collections.defaultdict(lambda: set())
+
+@app.get("/", response_class=HTMLResponse)
+def root(request: Request): 
+    return templates.TemplateResponse('howto.html', {"request": request})
+
+
+@app.route('/{class_id}', response_class=HTMLResponse)
+def student_interface(request: Request, class_id: Union[str, None] = Cookie(default=None)):
+    student_id = Cookie.get('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
     class2students[class_id].add(student_id)
-    response = make_response(render_template('student.html', timestamp=time.time(), class_id=class_id))
+    response = templates.TemplateResponse('student.html', timestamp=time.time(), class_id=class_id))
     response.set_cookie('student_id', student_id)
-    return response
+    return {"request": request, "class_id": class_id}
+
 
 @socketio.on('register_student')
 def register_student(timestamp, class_id):
@@ -31,32 +45,43 @@ def register_student(timestamp, class_id):
         class2students[cls].discard(student_id)
     class2students[class_id].add(student_id)
 
-def student_count(class_id): return L(sid2student.values()).filter(lambda s: s in class2students[class_id]).count()
+
+def student_count(class_id): 
+    return list(sid2student.values()).filter(lambda s: s in class2students[class_id]).count()
+
+
 def connected_student2color(class_id):
     return {k: v for k, v in student2color.items() if (k in class2students[class_id]) and (k in sid2student.values())}
+
+
 def active_student_count(class_id): # active student == one who is connected and color != 'inactive'
     return L(connected_student2color(class_id).values()).filter(lambda c: c != 'inactive').count()
 
+
 def color_fraction(class_id):
-    return {color: L(connected_student2color(class_id).values()).map(eq(color)).sum()/(active_student_count(class_id) or 1)
+    return {color: list(connected_student2color(class_id).values()).map(eq(color)).sum()/(active_student_count(class_id) or 1)
             for color in ['green', 'yellow', 'red']}
 
-@app.route('/<class_id>/teacher')
-def teacher_interface(class_id):
-    return render_template('teacher.html', student_count=student_count(class_id),
-        active_student_count=active_student_count(class_id), color2frac=color_fraction(class_id))
+
+@app.get('/{class_id}/teacher')
+def teacher_interface(request: Request, class_id: str):
+    return templates.TemplateResponse('teacher.html', 
+                                      {
+                                      "request": request, 
+                                      "student_count": student_count=student_count(class_id),
+                                      "active_student_count": active_student_count(class_id), 
+                                      "color2frac": color_fraction(class_id)
+                                      })
+
 
 @socketio.on('color_change')
 def handle_color_change(new_color): student2color[request.cookies['student_id']] = new_color
+
 
 @socketio.on('disconnect')
 def handle_disconnect():
     student = sid2student.pop(request.sid, None)
 
+
 @patch
-def count(self:L): return len(self)
-
-# socketio.run(app)
-http_server = WSGIServer(("0.0.0.0", 443), app)
-http_server.serve_forever()
-
+def count(self:list()): return len(self)
