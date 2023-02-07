@@ -3,6 +3,7 @@ from flask_socketio import SocketIO, emit
 import random, string, collections, time
 from fastcore.utils import *
 from urllib.parse import urlparse
+from gevent.pywsgi import WSGIServer
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -55,5 +56,7 @@ def handle_disconnect():
 @patch
 def count(self:L): return len(self)
 
-socketio.run(app)
+# socketio.run(app)
+http_server = WSGIServer(("0.0.0.0", 443), app)
+http_server.serve_forever()
 
