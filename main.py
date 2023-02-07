@@ -1,18 +1,18 @@
-# from flask import Flask, render_template, request, make_response
-from fastapi import FastAPI, Request, Cookie
+from fastapi import FastAPI, Request, Cookie, Response
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastcore.utils import *
 
-# from flask_socketio import SocketIO, emit
-from fastapi_socketio import SocketManager, emit
+from fastapi_socketio import SocketManager
 
-
+from typing import Union
 import random, string, collections, time
 from urllib.parse import urlparse
 
 app = FastAPI()
 socketio = SocketManager(app)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates")
 
@@ -25,19 +25,24 @@ def root(request: Request):
     return templates.TemplateResponse('howto.html', {"request": request})
 
 
-@app.route('/{class_id}', response_class=HTMLResponse)
-def student_interface(request: Request, class_id: collections.Union[str, None] = Cookie(default=None)):
-    student_id = Cookie.get('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
+@app.get('/{class_id}', response_class=HTMLResponse)
+def student_interface(request: Request, response: Response, class_id: Union[str, None] = Cookie(default=None)):
+    student_id = response.set_cookie('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
     class2students[class_id].add(student_id)
-    response = templates.TemplateResponse('student.html', timestamp=time.time(), class_id=class_id))
+    response = templates.TemplateResponse('student.html', 
+            {
+            "request": request,
+            "timestamp": time.time(), 
+            "lass_id": class_id
+            })
     response.set_cookie('student_id', student_id)
-    return {"request": request, "class_id": class_id}
+    return response
 
 
 @socketio.on('register_student')
 def register_student(request: Request, timestamp: str, class_id: str):
-    student_id = Cookie.get('student_id')
-    emit('deactivate_old_tabs', # a student can only have a single tab active
+    student_id = request.get_cookies('student_id')
+    SocketManager.emit('deactivate_old_tabs', # a student can only have a single tab active
             {'student_id':  student_id, 'timestamp': timestamp}, broadcast=True, namespace='/')
     student2color[student_id] = 'inactive' # upon connecting / opening a new tab a student is in an inactive state
     sid2student[request.sid] = student_id # used for keeping track of connected students
@@ -47,7 +52,7 @@ def register_student(request: Request, timestamp: str, class_id: str):
 
 
 def student_count(class_id): 
-    return list(sid2student.values()).filter(lambda s: s in class2students[class_id]).count()
+    return L(sid2student.values()).filter(lambda s: s in class2students[class_id]).count()
 
 
 def connected_student2color(class_id):
@@ -59,7 +64,7 @@ def active_student_count(class_id): # active student == one who is connected and
 
 
 def color_fraction(class_id):
-    return {color: list(connected_student2color(class_id).values()).map(eq(color)).sum()/(active_student_count(class_id) or 1)
+    return {color: L(connected_student2color(class_id).values()).map(eq(color)).sum()/(active_student_count(class_id) or 1)
             for color in ['green', 'yellow', 'red']}
 
 
@@ -76,12 +81,12 @@ def teacher_interface(request: Request, class_id: str):
 
 
 @socketio.on('color_change')
-def handle_color_change(new_color): student2color[Request.cookies['student_id']] = new_color
+def handle_color_change(new_color): student2color[request.set_cookies['student_id']] = new_color
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
     student = sid2student.pop(Request.sid, None)
 
-
-# def count(self: list()): return len(self)
+@patch
+def count(self: L): return len(self)
