@@ -8,7 +8,6 @@ from fastapi_socketio import SocketManager
 
 from typing import Union
 import random, string, collections, time
-from urllib.parse import urlparse
 
 app = FastAPI()
 socketio = SocketManager(app)
@@ -21,27 +20,32 @@ student2color = dict()
 class2students = collections.defaultdict(lambda: set())
 
 @app.get("/", response_class=HTMLResponse)
-def root(request: Request): 
-    return templates.TemplateResponse('howto.html', {"request": request})
+def root(request: Request):
+    url = f"https://{request.base_url}"
+    return templates.TemplateResponse('howto.html', 
+                {
+                "request": request, 
+                "url": url
+                })
 
 
 @app.get('/{class_id}', response_class=HTMLResponse)
 def student_interface(request: Request, response: Response, class_id: Union[str, None] = Cookie(default=None)):
-    student_id = response.set_cookie('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
+    student_id = request.cookies.get('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
     class2students[class_id].add(student_id)
     response = templates.TemplateResponse('student.html', 
             {
             "request": request,
             "timestamp": time.time(), 
-            "lass_id": class_id
+            "class_id": class_id
             })
-    response.set_cookie('student_id', student_id)
+    response.set_cookie(key='student_id', value=student_id)
     return response
 
 
 @socketio.on('register_student')
 def register_student(request: Request, timestamp: str, class_id: str):
-    student_id = request.get_cookies('student_id')
+    student_id = request.cookies.get('student_id')
     SocketManager.emit('deactivate_old_tabs', # a student can only have a single tab active
             {'student_id':  student_id, 'timestamp': timestamp}, broadcast=True, namespace='/')
     student2color[student_id] = 'inactive' # upon connecting / opening a new tab a student is in an inactive state
@@ -81,12 +85,13 @@ def teacher_interface(request: Request, class_id: str):
 
 
 @socketio.on('color_change')
-def handle_color_change(new_color): student2color[request.set_cookies['student_id']] = new_color
+def handle_color_change(new_color):
+    student2color[request.set_cookies['student_id']] = new_color
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    student = sid2student.pop(Request.sid, None)
+    student = sid2student.pop(request.sid, None)
 
 @patch
 def count(self: L): return len(self)
