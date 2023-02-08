@@ -4,13 +4,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastcore.utils import *
 
-from fastapi_socketio import SocketManager
+import socketio
 
 from typing import Union
 import random, string, collections, time
 
 app = FastAPI()
-socketio = SocketManager(app)
+socketio = socketio.AsyncClient(app)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates")
@@ -30,7 +30,7 @@ def root(request: Request):
 
 
 @app.get('/{class_id}', response_class=HTMLResponse)
-def student_interface(request: Request, response: Response, class_id: Union[str, None] = Cookie(default=None)):
+def student_interface(request: Request, response: Response, class_id: str, student_id:  Union[str, None] = Cookie(default=None)):
     student_id = request.cookies.get('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
     class2students[class_id].add(student_id)
     response = templates.TemplateResponse('student.html', 
@@ -40,6 +40,7 @@ def student_interface(request: Request, response: Response, class_id: Union[str,
             "class_id": class_id
             })
     response.set_cookie(key='student_id', value=student_id)
+    print("Student class ID: ", class_id) 
     return response
 
 
@@ -74,6 +75,7 @@ def color_fraction(class_id):
 
 @app.get('/{class_id}/teacher')
 def teacher_interface(request: Request, class_id: str):
+    print("Teacher class ID: ", class_id)
     return templates.TemplateResponse('teacher.html', 
                                       {
                                       "request": request, 
