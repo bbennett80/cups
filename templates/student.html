@@ -30,6 +30,17 @@
     var path = document.getElementsByClassName("path");
     var timestamp = parseFloat(document.getElementById("timestamp").value);
     var class_id = document.getElementById("class_id").value;
+    
+    socket.on('connect', function() {
+      // we are using the SID to track connected students
+      // SID is only available AFTER js loads, hence this call
+      // (othwerise, we could store the SID for tracking connections
+      // directly in student_interface on the server)
+      socket.emit('register_student', timestamp, class_id);
+
+      // to handle server restarts / reconnections
+      path.attr('class', 'inactive');
+    });
 
     socket.on('deactivate_old_tabs', function(data) {
           if (timestamp < data['timestamp']) {
