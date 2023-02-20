@@ -1,7 +1,6 @@
 {% extends "layout.html" %}
 
 {% block body %}
-
 <span id="timestamp">{{ timestamp }}</span>
 <span id="class_id">{{ class_id }}</span>
 
@@ -21,42 +20,35 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
-<!-- <script src="https://cdn.jsdelivr.net/npm/umbrellajs"></script> -->
 <script src="https://cdn.jsdelivr.net/npm/js-cookie@3.0.1/dist/js.cookie.min.js" integrity="sha256-0H3Nuz3aug3afVbUlsu12Puxva3CP4EhJtPExqs54Vg=" crossorigin="anonymous"></script>
 
 <script>
   document.addEventListener("DOMContentLoaded", function() {
-    var socket = io();
-    var path = document.getElementsByClassName("path");
-    var timestamp = parseFloat(document.getElementById("timestamp").value);
-    var class_id = document.getElementById("class_id").value;
+    let socket = io();
+    let path = document.querySelector("path");
+    let timestamp = parseFloat(document.getElementById("timestamp").innerHTML);
+    let class_id = document.getElementById("class_id").innerHTML;
     
     socket.on('connect', function() {
-      // we are using the SID to track connected students
-      // SID is only available AFTER js loads, hence this call
-      // (othwerise, we could store the SID for tracking connections
-      // directly in student_interface on the server)
       socket.emit('register_student', timestamp, class_id);
-
-      // to handle server restarts / reconnections
-      path.attr('class', 'inactive');
+      path.setAttribute('class', 'inactive');
     });
 
     socket.on('deactivate_old_tabs', function(data) {
-          if (timestamp < data['timestamp']) {
-            if (Cookies.get('student_id') == data['student_id']) {
-        document.getElementsByClassName("body").innerHTML = '<h1>This tab is no longer active. Please close it or reload the page to reactivate it.</h1>'
-            socket.disconnect();
-          }
+      if (timestamp < data['timestamp']) {
+        if (Cookies.get('student_id') == data['student_id']) {
+          document.getElementsByTagName("body").innerHTML = '<h1>This tab is no longer active. Please close it or reload the page to reactivate it.</h1>'
+          socket.disconnect();
         }
-      });
+      }
+    });
 
-    document.getElementsByClassName("p").addEventListener("click", function() {
-          var new_color = this.className;
-          path.setAttribute('class', '')
-          path.addClass(new_color);
-          socket.emit('color_change', new_color);
-      });
+    Array.from(document.getElementsByTagName("p")).forEach(e => e.addEventListener("click",  function() {
+      var new_color = this.className;
+      path.setAttribute('class', '');
+      path.classList.add(new_color);
+      socket.emit('color_change', new_color);
+    }))
   });
 </script>
 {% endblock %}
