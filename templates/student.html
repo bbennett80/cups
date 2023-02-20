@@ -29,6 +29,12 @@
     let timestamp = parseFloat(document.getElementById("timestamp").innerHTML);
     let class_id = document.getElementById("class_id").innerHTML;
     
+    function getCookie(name) {
+      let value = `; ${document.cookie}`;
+      let parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+    }
+    
     socket.on('connect', function() {
       socket.emit('register_student', timestamp, class_id);
       path.setAttribute('class', 'inactive');
@@ -36,8 +42,8 @@
 
     socket.on('deactivate_old_tabs', function(data) {
       if (timestamp < data['timestamp']) {
-        if (Cookies.get('student_id') == data['student_id']) {
-          document.getElementsByTagName("body").innerHTML = '<h1>This tab is no longer active. Please close it or reload the page to reactivate it.</h1>'
+        if (getCookie("student_id") == data['student_id']) {
+          document.querySelector("body").innerHTML = '<h1>This tab is no longer active. Please close it or reload the page to reactivate it.</h1>'
           socket.disconnect();
         }
       }
