@@ -49,7 +49,7 @@
     });
 
     Array.from(document.getElementsByTagName("p")).forEach(e => e.addEventListener("click",  function() {
-      var new_color = this.className;
+      let new_color = this.className;
       path.setAttribute('class', '');
       path.classList.add(new_color);
       socket.emit('color_change', new_color);
