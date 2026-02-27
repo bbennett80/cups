@@ -6,7 +6,7 @@
 
 <div class="main">
   <svg viewBox="0 0 218 227" xmlns="http://www.w3.org/2000/svg">
-    <path class="inactive" d="M175 1H42L1 226H217L175 1Z" />
+    <path id="cup_status_path" class="inactive" d="M175 1H42L1 226H217L175 1Z" />
   </svg>
   <p class="green">
     Green - I am comfortable with my understanding and pacing of the lesson
@@ -24,7 +24,7 @@
 <script>
   document.addEventListener("DOMContentLoaded", function() {
     let socket = io();
-    let path = document.querySelector("path");
+    let path = document.getElementById("cup_status_path");
     let timestamp = parseFloat(document.getElementById("timestamp").innerHTML);
     let class_id = document.getElementById("class_id").innerHTML;
     
