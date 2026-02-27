@@ -1,9 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <script>
+      (function() {
+        try {
+          const savedTheme = localStorage.getItem("theme");
+          if (savedTheme === "dark" || savedTheme === "light") {
+            document.documentElement.setAttribute("data-theme", savedTheme);
+          } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            document.documentElement.setAttribute("data-theme", "dark");
+          }
+        } catch (err) {
+          // Ignore storage errors and continue with default theme.
+        }
+      })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>fastcups</title>
+    <title>Runnercups</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
     <link rel="shortcut icon" href="{{ url_for('static', path='/favicon.ico') }}">
 
@@ -12,12 +26,70 @@
     <meta name="twitter:creator" content="@jeremyphoward" />
     <meta name="twitter:image" content="{{ url_for("static", path="cups.jpg") }}" />
     <meta property="og:url" content="https://cups.fast.ai/" />
-    <meta property="og:title" content="Fastcups - stay in sync with your students" />
-    <meta property="og:description" content="Making sure your students are able to follow along as you teach is important - fastcups can help!" />
+    <meta property="og:title" content="Runnercups - stay in sync with your students" />
+    <meta property="og:description" content="Making sure your students are able to follow along as you teach is important - Runnercups can help!" />
     <meta property="og:image" content="{{ url_for("static", path="cups.jpg") }}" />
   </head>
   <body>
+    <header class="topbar">
+      <a class="brand" href="/">Runnercups</a>
+      <nav class="topnav">
+        {% if current_teacher %}
+        <a href="/teacher/dashboard">Dashboard</a>
+        <span class="teacher-email">{{ current_teacher["email"] }}</span>
+        <form method="post" action="/teacher/logout">
+          <button type="submit" class="button-ghost">Sign out</button>
+        </form>
+        {% else %}
+        <a href="/teacher/signin">Teacher Sign In</a>
+        <a href="/teacher/signup">Teacher Sign Up</a>
+        {% endif %}
+        <button type="button" id="theme_toggle" class="button-ghost theme-toggle" aria-label="Toggle dark mode">
+          <svg class="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M21.752 15.002A9.718 9.718 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <svg class="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 3v1.5m0 15V21m8.25-9H21m-18 0h.75m14.78 6.53.53.53M5.72 5.72l.53.53m12.03 0-.53.53M6.25 17.78l-.53.53M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </nav>
+    </header>
     {% block body %}
     {% endblock %}
+    <script>
+      (function() {
+        const root = document.documentElement;
+        const toggle = document.getElementById("theme_toggle");
+        if (!toggle) return;
+
+        function currentTheme() {
+          return root.getAttribute("data-theme") === "dark" ? "dark" : "light";
+        }
+
+        function updateToggleA11y() {
+          const isDark = currentTheme() === "dark";
+          toggle.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+        }
+
+        toggle.addEventListener("click", function() {
+          const nextTheme = currentTheme() === "dark" ? "light" : "dark";
+          root.setAttribute("data-theme", nextTheme);
+          localStorage.setItem("theme", nextTheme);
+          updateToggleA11y();
+        });
+
+        updateToggleA11y();
+      })();
+    </script>
   </body>
 </html>

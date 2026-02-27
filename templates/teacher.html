@@ -1,26 +1,63 @@
 {% extends "layout.html" %}
 
 {% block body %}
-<div style="margin: 20px auto 0; height: {{ color2frac['red'] * 60}}vh; width: 100px; background-color: red">
-</div>
-<div style="margin: auto; height: {{ color2frac['yellow'] * 60}}vh; width: 100px; background-color:yellow">
-</div>
-<div style="margin: 0 auto 20px; height: {{ color2frac['green'] * 60}}vh; width: 100px; background-color: green">
+<span id="class_id">{{ class_id }}</span>
+
+<div class="dashboard">
+  <div class="traffic-stack">
+    <div id="meter_red" class="meter red" style="--fill-height: {{ color2frac['red'] * 60}}vh"></div>
+    <div id="meter_yellow" class="meter yellow" style="--fill-height: {{ color2frac['yellow'] * 60}}vh"></div>
+    <div id="meter_green" class="meter green" style="--fill-height: {{ color2frac['green'] * 60}}vh"></div>
+  </div>
+
+  <div class="stats">
+    <div class="primary">
+      Active students:
+      <span id="active_student_count">{{ active_student_count }}</span>
+    </div>
+    <div class="secondary">
+      Student count:
+      <span id="student_count">{{ student_count }}</span>
+    </div>
+  </div>
 </div>
 
-<span style="font-size: 1.5rem; padding: 1rem;">
-  <strong>Active students: </strong>
-  <span id="active_student_count">{{ active_student_count }}</span>
-</span>
-<br>
-<span style="color: darkgray; padding: 1rem;">
-  Student count:
-  <span id="student_count">{{ student_count }}</span>
-</span>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js" integrity="sha512-AI5A3zIoeRSEEX9z3Vyir8NqSMC1pY7r5h2cE+9J6FLsoEmSSGLFaqMQw8SWvoONXogkfFrkQiJfLeHLz3+HOg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <script>
-  setTimeout(function(){
-    window.location.reload();
-  }, 3000);
+  document.addEventListener("DOMContentLoaded", function() {
+    let socket = io({ reconnection: true });
+    let class_id = document.getElementById("class_id").textContent.trim();
+
+    function setMeterHeight(id, fraction) {
+      let meter = document.getElementById(id);
+      let vh = Math.max(0, Math.min(60, (fraction || 0) * 60));
+      meter.style.setProperty("--fill-height", vh + "vh");
+    }
+
+    socket.on("connect", function() {
+      socket.emit("join_teacher_class", class_id);
+    });
+
+    socket.on("reconnect", function() {
+      socket.emit("join_teacher_class", class_id);
+    });
+
+    socket.on("connect_error", function(error) {
+      console.error("Teacher socket connect_error:", error.message);
+    });
+
+    socket.on("teacher_stats", function(payload) {
+      if (!payload || payload.class_id !== class_id) return;
+
+      document.getElementById("active_student_count").textContent = payload.active_student_count;
+      document.getElementById("student_count").textContent = payload.student_count;
+
+      let color2frac = payload.color2frac || {};
+      setMeterHeight("meter_red", color2frac.red);
+      setMeterHeight("meter_yellow", color2frac.yellow);
+      setMeterHeight("meter_green", color2frac.green);
+    });
+  });
 </script>
 {% endblock %}

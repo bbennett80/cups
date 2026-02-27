@@ -1,2 +1,7 @@
 chromedriver
 __pycache__
+.get
+.venv/
+.vscode
+teachers.db
+

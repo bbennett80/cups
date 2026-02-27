@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+
+{% block body %}
+<div class="teacher-home">
+  <div class="teacher-home-header">
+    <h1>Teacher Dashboard</h1>
+    <p>Create a unique class URL, then share the student link while you keep the teacher view open.</p>
+  </div>
+
+  {% if error %}
+  <div class="form-error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/teacher/classes" class="class-create-form">
+    <label for="class_name">Class URL Name</label>
+    <div class="class-create-row">
+      <input
+        id="class_name"
+        name="class_name"
+        type="text"
+        required
+        minlength="3"
+        maxlength="40"
+        pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]"
+        placeholder="biology-101"
+      >
+      <button type="submit">Create Class</button>
+    </div>
+    <p class="helper-text">Allowed: lowercase letters, numbers, hyphens (3-40 chars).</p>
+  </form>
+
+  <section class="class-list">
+    <h2>Your Classes</h2>
+    {% if classes %}
+    <ul>
+      {% for cls in classes %}
+      <li>
+        <div>
+          <strong>{{ cls["class_name"] }}</strong>
+        </div>
+        <div class="class-links">
+          <a href="/{{ cls['class_name'] }}/teacher">Teacher View</a>
+          <span class="class-link-sep">|</span>
+          <button
+            type="button"
+            class="button-link student-qr-trigger"
+            data-class-name="{{ cls['class_name'] }}"
+            data-student-url="{{ request.base_url }}{{ cls['class_name'] }}"
+          >
+            Student Link
+          </button>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-state">You have no classes yet. Create your first class above.</p>
+    {% endif %}
+  </section>
+</div>
+
+<div id="qr_modal" class="modal" aria-hidden="true">
+  <div class="modal-backdrop" data-close-modal="true"></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="qr_modal_title">
+    <button type="button" class="modal-close" id="close_qr_modal" aria-label="Close">×</button>
+    <h2 id="qr_modal_title">Student QR Code</h2>
+    <p id="qr_modal_subtitle" class="helper-text"></p>
+    <div class="qr-box">
+      <img id="qr_image" alt="Student class QR code">
+    </div>
+    <a id="qr_student_url" href="#" target="_blank" rel="noopener noreferrer"></a>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    let modal = document.getElementById("qr_modal");
+    let closeButton = document.getElementById("close_qr_modal");
+    let qrImage = document.getElementById("qr_image");
+    let subtitle = document.getElementById("qr_modal_subtitle");
+    let studentUrlLink = document.getElementById("qr_student_url");
+
+    function closeModal() {
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    function openModal(className, studentUrl) {
+      subtitle.textContent = "Class: " + className;
+      studentUrlLink.textContent = studentUrl;
+      studentUrlLink.href = studentUrl;
+      qrImage.src = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(studentUrl);
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden", "false");
+    }
+
+    document.querySelectorAll(".student-qr-trigger").forEach(function(button) {
+      button.addEventListener("click", function() {
+        let className = button.dataset.className || "";
+        let studentUrl = button.dataset.studentUrl || "";
+        openModal(className, studentUrl);
+      });
+    });
+
+    closeButton.addEventListener("click", closeModal);
+    modal.addEventListener("click", function(event) {
+      if (event.target && event.target.dataset.closeModal === "true") {
+        closeModal();
+      }
+    });
+    document.addEventListener("keydown", function(event) {
+      if (event.key === "Escape" && modal.classList.contains("open")) {
+        closeModal();
+      }
+    });
+  });
+</script>
+{% endblock %}
