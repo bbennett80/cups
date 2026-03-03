@@ -8,6 +8,7 @@ import socketio
 from http.cookies import SimpleCookie
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
+import os
 import random, string, collections, time, secrets, hashlib, hmac, sqlite3, re
 
 fastapi_app = FastAPI()
@@ -135,7 +136,13 @@ def current_teacher(request: Request):
 
 
 def template_context(request: Request, extra=None):
-    context = {"request": request, "current_teacher": current_teacher(request)}
+    style_path = os.path.join("static", "styles.css")
+    style_version = int(os.path.getmtime(style_path)) if os.path.exists(style_path) else 0
+    context = {
+        "request": request,
+        "current_teacher": current_teacher(request),
+        "style_version": style_version,
+    }
     if extra:
         context.update(extra)
     return context
