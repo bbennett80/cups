@@ -11,10 +11,10 @@ from datetime import datetime, timedelta, timezone
 import os
 import random, string, collections, time, secrets, hashlib, hmac, sqlite3, re
 
-fastapi_app = FastAPI()
+app = FastAPI()
 socket_server = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-app = socketio.ASGIApp(socket_server, fastapi_app)
-fastapi_app.mount("/static", StaticFiles(directory="static"), name="static")
+app = socketio.ASGIApp(socket_server, app)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates")
 
@@ -197,13 +197,13 @@ def teacher_owns_class(teacher_id, class_id):
 
 init_db()
 
-@fastapi_app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
 def root(request: Request):
     url = f"{request.base_url}"
     return templates.TemplateResponse('howto.html', template_context(request, {"url": url}))
 
 
-@fastapi_app.get("/teacher/signup", response_class=HTMLResponse)
+@app.get("/teacher/signup", response_class=HTMLResponse)
 def teacher_signup_page(request: Request, next_path: str = DASHBOARD_PATH):
     next_path = safe_next_path(next_path)
     teacher = current_teacher(request)
@@ -215,7 +215,7 @@ def teacher_signup_page(request: Request, next_path: str = DASHBOARD_PATH):
     )
 
 
-@fastapi_app.post("/teacher/signup", response_class=HTMLResponse)
+@app.post("/teacher/signup", response_class=HTMLResponse)
 def teacher_signup_submit(
     request: Request,
     email: str = Form(...),
@@ -268,7 +268,7 @@ def teacher_signup_submit(
     return response
 
 
-@fastapi_app.get("/teacher/signin", response_class=HTMLResponse)
+@app.get("/teacher/signin", response_class=HTMLResponse)
 def teacher_signin_page(request: Request, next_path: str = DASHBOARD_PATH):
     next_path = safe_next_path(next_path)
     teacher = current_teacher(request)
@@ -280,7 +280,7 @@ def teacher_signin_page(request: Request, next_path: str = DASHBOARD_PATH):
     )
 
 
-@fastapi_app.post("/teacher/signin", response_class=HTMLResponse)
+@app.post("/teacher/signin", response_class=HTMLResponse)
 def teacher_signin_submit(
     request: Request,
     email: str = Form(...),
@@ -309,7 +309,7 @@ def teacher_signin_submit(
     return response
 
 
-@fastapi_app.post("/teacher/logout")
+@app.post("/teacher/logout")
 def teacher_logout(request: Request):
     session_token = request.cookies.get(TEACHER_SESSION_COOKIE)
     clear_teacher_session(session_token)
@@ -318,7 +318,7 @@ def teacher_logout(request: Request):
     return response
 
 
-@fastapi_app.get("/teacher/dashboard", response_class=HTMLResponse)
+@app.get("/teacher/dashboard", response_class=HTMLResponse)
 def teacher_dashboard(request: Request, error: str | None = None):
     teacher = current_teacher(request)
     if not teacher:
@@ -331,7 +331,7 @@ def teacher_dashboard(request: Request, error: str | None = None):
     )
 
 
-@fastapi_app.post("/teacher/classes")
+@app.post("/teacher/classes")
 def create_teacher_class(request: Request, class_name: str = Form(...)):
     teacher = current_teacher(request)
     if not teacher:
@@ -378,7 +378,7 @@ def create_teacher_class(request: Request, class_name: str = Form(...)):
     return RedirectResponse(DASHBOARD_PATH, status_code=303)
 
 
-@fastapi_app.get('/{class_id}', response_class=HTMLResponse)
+@app.get('/{class_id}', response_class=HTMLResponse)
 def student_interface(request: Request, response: Response, class_id: str):
     student_id = request.cookies.get('student_id') or ''.join(random.choices(string.ascii_letters, k=12))
     class2students[class_id].add(student_id)
@@ -463,7 +463,7 @@ async def emit_teacher_stats(class_id):
             await socket_server.emit("teacher_stats", payload, to=teacher_sid)
 
 
-@fastapi_app.get('/{class_id}/teacher')
+@app.get('/{class_id}/teacher')
 def teacher_interface(request: Request, class_id: str):
     teacher = current_teacher(request)
     if not teacher:
