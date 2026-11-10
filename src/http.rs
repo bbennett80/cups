@@ -10,7 +10,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
 
-use crate::{AppState, auth, db};
+use crate::{
+    AppState, auth, db,
+    forms::{self, ClassName, FormError, FormState},
+};
 
 pub(crate) struct AppError(anyhow::Error);
 
@@ -55,6 +58,11 @@ async fn render(
     context["current_teacher"] = json!(auth::current_teacher(&state.db, jar).await?);
     context["style_version"] = json!(state.style_version);
     context["request"] = json!({"base_url": base_url(headers)});
+    context["form_state"] = json!(if context.get("error").is_some_and(|e| !e.is_null()) {
+        FormState::Rejected
+    } else {
+        FormState::Ready
+    });
     let html = state.templates.get_template(template)?.render(context)?;
     Ok((status, Html(html)).into_response())
 }
@@ -144,46 +152,46 @@ pub(crate) async fn signup(
 ) -> Result {
     let next = auth::safe_next_path(form.next_path.as_deref());
     let email = form.email.trim().to_lowercase();
-    let error = if email.is_empty() || !email.contains('@') {
-        Some("Enter a valid email.")
-    } else if form.password.chars().count() < 8 {
-        Some("Password must be at least 8 characters.")
-    } else if form.password != form.password_confirm {
-        Some("Passwords do not match.")
-    } else {
-        None
-    };
-    if let Some(error) = error {
+    if let Err(error) = forms::validate_signup(&email, &form.password, &form.password_confirm) {
         return render(
             &state,
             &jar,
             &headers,
             "teacher_signup.html",
-            json!({"next_path": next, "error": error}),
+            json!({"next_path": next, "email": email, "error": error.message()}),
             StatusCode::BAD_REQUEST,
         )
         .await;
     }
     // PBKDF2 is CPU-intensive: keep it off Tokio's request worker threads.
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&form.password)).await?;
+    let mut transaction = state.db.begin().await?;
     let insert =
         sqlx::query("INSERT INTO teachers (email, password_hash, created_at) VALUES (?, ?, ?)")
-            .bind(email)
+            .bind(&email)
             .bind(hash)
             .bind(db::now())
-            .execute(&state.db)
+            .execute(&mut *transaction)
             .await;
-    let teacher_id =
-        match insert {
-            Ok(result) => result.last_insert_rowid(),
-            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
-                return render(&state, &jar, &headers, "teacher_signup.html", json!({
-                "next_path": next, "error": "A teacher account with this email already exists."
-            }), StatusCode::BAD_REQUEST).await;
-            }
-            Err(error) => return Err(error.into()),
-        };
-    let jar = auth::session(&state.db, teacher_id, jar).await?;
+    let teacher_id = match insert {
+        Ok(result) => result.last_insert_rowid(),
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            transaction.rollback().await?;
+            return render(
+                &state,
+                &jar,
+                &headers,
+                "teacher_signup.html",
+                json!({"next_path": next, "email": email, "error": FormError::AccountExists.message()}),
+                StatusCode::BAD_REQUEST,
+            ).await;
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let session = auth::NewSession::prepare();
+    session.persist(&mut transaction, teacher_id).await?;
+    transaction.commit().await?;
+    let jar = session.issue_cookie(jar);
     Ok((jar, Redirect::to(next)).into_response())
 }
 
@@ -201,8 +209,9 @@ pub(crate) async fn signin(
     Form(form): Form<Signin>,
 ) -> Result {
     let next = auth::safe_next_path(form.next_path.as_deref());
+    let email = form.email.trim().to_lowercase();
     let row = sqlx::query("SELECT id, password_hash FROM teachers WHERE email = ?")
-        .bind(form.email.trim().to_lowercase())
+        .bind(&email)
         .fetch_optional(&state.db)
         .await?;
     if let Some(row) = row {
@@ -220,7 +229,7 @@ pub(crate) async fn signin(
         &headers,
         "teacher_signin.html",
         json!({
-            "next_path": next, "error": "Invalid email or password."
+            "next_path": next, "email": email, "error": FormError::InvalidCredentials.message()
         }),
         StatusCode::UNAUTHORIZED,
     )
@@ -228,6 +237,7 @@ pub(crate) async fn signin(
 }
 
 pub(crate) async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result {
+    let _auth_guard = state.auth_gate.lock().await;
     if let Some(cookie) = jar.get(auth::COOKIE) {
         sqlx::query("DELETE FROM teacher_sessions WHERE token = ?")
             .bind(cookie.value())
@@ -237,7 +247,9 @@ pub(crate) async fn logout(State(state): State<AppState>, jar: CookieJar) -> Res
             .live
             .lock()
             .await
-            .remove_teacher_session(cookie.value());
+            .apply(crate::classroom::Event::RevokeSession {
+                token: cookie.value().into(),
+            });
     }
     let jar = jar.remove(Cookie::build(auth::COOKIE).path("/").build());
     Ok((jar, Redirect::to("/")).into_response())
@@ -275,15 +287,6 @@ pub(crate) struct CreateClass {
     class_name: String,
 }
 
-fn valid_class_name(name: &str) -> bool {
-    (3..=40).contains(&name.len())
-        && name
-            .bytes()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
-        && !name.starts_with('-')
-        && !name.ends_with('-')
-}
-
 pub(crate) async fn create_class(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -294,27 +297,24 @@ pub(crate) async fn create_class(
         return Ok(signin_redirect(auth::DASHBOARD));
     };
     let name = form.class_name.trim().to_lowercase();
-    let (status, error) = if !valid_class_name(&name) {
-        (
-            StatusCode::BAD_REQUEST,
-            "Class URL must be 3-40 chars, lowercase letters/numbers/hyphens, and cannot start/end with a hyphen.",
-        )
-    } else {
-        match sqlx::query(
-            "INSERT INTO classes (teacher_id, class_name, created_at) VALUES (?, ?, ?)",
-        )
-        .bind(teacher.id)
-        .bind(&name)
-        .bind(db::now())
-        .execute(&state.db)
-        .await
-        {
-            Ok(_) => return Ok(Redirect::to(auth::DASHBOARD).into_response()),
-            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => (
-                StatusCode::CONFLICT,
-                "That class URL is already taken. Choose another name.",
-            ),
-            Err(error) => return Err(error.into()),
+    let (status, error) = match ClassName::parse(&name) {
+        Err(error) => (StatusCode::BAD_REQUEST, error),
+        Ok(valid_name) => {
+            match sqlx::query(
+                "INSERT INTO classes (teacher_id, class_name, created_at) VALUES (?, ?, ?)",
+            )
+            .bind(teacher.id)
+            .bind(valid_name.as_str())
+            .bind(db::now())
+            .execute(&state.db)
+            .await
+            {
+                Ok(_) => return Ok(Redirect::to(auth::DASHBOARD).into_response()),
+                Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+                    (StatusCode::CONFLICT, FormError::ClassTaken)
+                }
+                Err(error) => return Err(error.into()),
+            }
         }
     };
     render(
@@ -323,7 +323,7 @@ pub(crate) async fn create_class(
         &headers,
         "teacher_dashboard.html",
         json!({
-            "classes": db::classes(&state.db, teacher.id).await?, "error": error
+            "classes": db::classes(&state.db, teacher.id).await?, "class_name": name, "error": error.message()
         }),
         status,
     )
@@ -368,11 +368,12 @@ pub(crate) async fn teacher(
     headers: HeaderMap,
     Path(class_id): Path<String>,
 ) -> Result {
-    let Some(teacher) = auth::current_teacher(&state.db, &jar).await? else {
-        return Ok(signin_redirect(&format!("/{class_id}/teacher")));
-    };
-    if !db::owns_class(&state.db, teacher.id, &class_id).await? {
-        return Ok(Redirect::to(auth::DASHBOARD).into_response());
+    match auth::class_access(&state.db, &jar, &class_id).await? {
+        auth::ClassAccess::Allowed(_) => {}
+        auth::ClassAccess::SignInRequired(_) => {
+            return Ok(signin_redirect(&format!("/{class_id}/teacher")));
+        }
+        auth::ClassAccess::Forbidden => return Ok(Redirect::to(auth::DASHBOARD).into_response()),
     }
     let stats = state.live.lock().await.stats(&class_id);
     render(
@@ -384,29 +385,4 @@ pub(crate) async fn teacher(
         StatusCode::OK,
     )
     .await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_class_name;
-
-    #[test]
-    fn class_names_match_the_form_contract() {
-        for name in ["biology-101", "abc", "a-1", &"a".repeat(40)] {
-            assert!(valid_class_name(name), "{name}");
-        }
-        for name in [
-            "a",
-            "ab",
-            "-abc",
-            "abc-",
-            "ABC",
-            "a b",
-            "a/b",
-            "éab",
-            &"a".repeat(41),
-        ] {
-            assert!(!valid_class_name(name), "{name}");
-        }
-    }
 }

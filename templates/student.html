@@ -4,56 +4,24 @@
 <span id="timestamp">{{ timestamp }}</span>
 <span id="class_id">{{ class_id }}</span>
 
-<div class="main">
+<div class="main" data-page="student" data-state="connecting">
+  <p id="connection_status" class="connection-status" role="status" aria-live="polite">Connecting…</p>
+  <a href="" data-reload hidden>Reload to reconnect</a>
+  <noscript><p>Enable JavaScript to share live feedback.</p></noscript>
   <svg viewBox="0 0 218 227" xmlns="http://www.w3.org/2000/svg">
     <path id="cup_status_path" class="inactive" d="M175 1H42L1 226H217L175 1Z" />
   </svg>
-  <p class="green">
+  <button type="button" class="feedback-choice green" data-color="green" aria-pressed="false" disabled>
     Green - I am comfortable with my understanding and pacing of the lesson
-  </p>
-  <p class="yellow">
+  </button>
+  <button type="button" class="feedback-choice yellow" data-color="yellow" aria-pressed="false" disabled>
     Yellow - I am working through my understanding, I would benefit from the teacher slowing down or revisiting the current concept
-  </p>
-  <p class="red">
+  </button>
+  <button type="button" class="feedback-choice red" data-color="red" aria-pressed="false" disabled>
     Red - STOP! I am not understanding and I have a question
-  </p>
+  </button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js" integrity="sha512-AI5A3zIoeRSEEX9z3Vyir8NqSMC1pY7r5h2cE+9J6FLsoEmSSGLFaqMQw8SWvoONXogkfFrkQiJfLeHLz3+HOg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-<script>
-  document.addEventListener("DOMContentLoaded", function() {
-    let socket = io();
-    let path = document.getElementById("cup_status_path");
-    let timestamp = parseFloat(document.getElementById("timestamp").innerHTML);
-    let class_id = document.getElementById("class_id").innerHTML;
-    
-    function getCookie(name) {
-      let value = `; ${document.cookie}`;
-      let parts = value.split(`; ${name}=`);
-      if (parts.length === 2) return parts.pop().split(';').shift();
-    }
-    
-    socket.on('connect', function() {
-      socket.emit('register_student', timestamp, class_id);
-      path.setAttribute('class', 'inactive');
-    });
-
-    socket.on('deactivate_old_tabs', function(data) {
-      if (timestamp < data['timestamp']) {
-        if (getCookie("student_id") == data['student_id']) {
-          document.querySelector("body").innerHTML = '<h1>This tab is no longer active. Please close it or reload the page to reactivate it.</h1>'
-          socket.disconnect();
-        }
-      }
-    });
-
-    Array.from(document.getElementsByTagName("p")).forEach(e => e.addEventListener("click",  function() {
-      let new_color = this.className;
-      path.setAttribute('class', '');
-      path.classList.add(new_color);
-      socket.emit('color_change', new_color);
-    }))
-  });
-</script>
 {% endblock %}

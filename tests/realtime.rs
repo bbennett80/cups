@@ -1,6 +1,6 @@
 mod common;
 
-use std::{net::SocketAddr, time::Duration};
+use std::{collections::VecDeque, net::SocketAddr, time::Duration};
 
 use axum::{body::Body, http::Request};
 use common::TestApp;
@@ -14,7 +14,7 @@ use tokio_tungstenite::{
 };
 use tower::ServiceExt;
 
-struct Client(WebSocketStream<MaybeTlsStream<TcpStream>>);
+struct Client(WebSocketStream<MaybeTlsStream<TcpStream>>, VecDeque<Value>);
 
 impl Client {
     async fn connect(address: SocketAddr, cookie: Option<&str>) -> Self {
@@ -27,7 +27,7 @@ impl Client {
                 .insert("cookie", cookie.parse().unwrap());
         }
         let (socket, _) = connect_async(request).await.unwrap();
-        let mut client = Self(socket);
+        let mut client = Self(socket, VecDeque::new());
         assert!(client.packet().await.starts_with('0'));
         client.0.send(Message::Text("40".into())).await.unwrap();
         assert!(client.packet().await.starts_with("40"));
@@ -59,6 +59,10 @@ impl Client {
     }
 
     async fn event(&mut self, name: &str) -> Value {
+        if let Some(event) = self.1.pop_front() {
+            assert_eq!(event[0], name);
+            return event[1].clone();
+        }
         let packet = self.packet().await;
         assert!(packet.starts_with("42"), "{packet}");
         let event: Value = serde_json::from_str(&packet[2..]).unwrap();
@@ -67,11 +71,29 @@ impl Client {
     }
 
     async fn no_event(&mut self) {
+        assert!(self.1.is_empty(), "unexpected buffered event");
         let packet = timeout(Duration::from_millis(100), self.packet()).await;
         assert!(
             packet.is_err(),
             "unauthorized or stale client received an event: {packet:?}"
         );
+    }
+
+    async fn command(&mut self, arguments: Value) -> Value {
+        self.0
+            .send(Message::Text(format!("421{arguments}").into()))
+            .await
+            .unwrap();
+        loop {
+            let packet = self.packet().await;
+            if let Some(ack) = packet.strip_prefix("431") {
+                let values: Value = serde_json::from_str(ack).unwrap();
+                return values[0].clone();
+            }
+            assert!(packet.starts_with("42"), "{packet}");
+            self.1
+                .push_back(serde_json::from_str(&packet[2..]).unwrap());
+        }
     }
 
     async fn disconnect(&mut self) {
@@ -266,6 +288,14 @@ async fn live_counts_colors_tabs_class_switching_and_authorization() {
 
     app.request("POST", "/teacher/logout", Some(&owner), "")
         .await;
+    assert_eq!(
+        teacher.event("teacher_access_ended").await["reason"],
+        "revoked"
+    );
+    assert_eq!(
+        chemistry.event("teacher_access_ended").await["reason"],
+        "revoked"
+    );
     teacher
         .emit(json!(["join_teacher_class", "biology-101"]))
         .await;
@@ -385,4 +415,157 @@ async fn socket_io_polling_transport_preserves_browser_event_format() {
     );
     polling_request(&app, "POST", &student.uri, &student.cookie, "41").await;
     assert_stats(&teacher.stats(&app).await, "biology-101", 0, 0, [0.0; 3]);
+}
+
+#[tokio::test]
+async fn command_acknowledgements_enforce_registration_and_access() {
+    let app = TestApp::new().await;
+    let owner = app.signup("owner@test.com").await;
+    let other = app.signup("other@test.com").await;
+    app.create_class(&owner, "biology-101").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = app.router.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let mut teacher = Client::connect(address, Some(&owner)).await;
+    assert_eq!(
+        teacher
+            .command(json!(["join_teacher_class", "biology-101"]))
+            .await,
+        json!({"status": "ok", "state": "watching"})
+    );
+    teacher.event("teacher_stats").await;
+    let mut foreign = Client::connect(address, Some(&other)).await;
+    assert_eq!(
+        foreign
+            .command(json!(["join_teacher_class", "biology-101"]))
+            .await,
+        json!({"status": "error", "reason": "forbidden"})
+    );
+    let cookie = app.request("GET", "/biology-101", None, "").await.cookie();
+    let mut student = Client::connect(address, Some(&cookie)).await;
+    assert_eq!(
+        student.command(json!(["color_change", "green"])).await,
+        json!({"status": "error", "reason": "not_registered"})
+    );
+    assert_eq!(
+        student
+            .command(json!(["register_student", 1.0, "biology-101"]))
+            .await,
+        json!({"status": "ok", "state": "registered"})
+    );
+    teacher.event("teacher_stats").await;
+    assert_eq!(
+        student.command(json!(["color_change", "green"])).await,
+        json!({"status": "ok", "state": "updated"})
+    );
+    teacher.event("teacher_stats").await;
+    student
+        .command(json!(["register_student", 1.0, "biology-101"]))
+        .await;
+    teacher.no_event().await;
+    assert_eq!(
+        app.request("GET", "/biology-101/teacher", Some(&owner), "")
+            .await
+            .status,
+        200
+    );
+    let mut newer = Client::connect(address, Some(&cookie)).await;
+    newer
+        .command(json!(["register_student", 1.0, "biology-101"]))
+        .await;
+    assert_eq!(
+        student.event("deactivate_old_tabs").await["superseded"],
+        true
+    );
+    assert_eq!(
+        student.command(json!(["color_change", "red"])).await,
+        json!({"status": "error", "reason": "superseded"})
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn live_subscription_expires_without_student_activity() {
+    let app = TestApp::new().await;
+    let owner = app.signup("owner@test.com").await;
+    app.create_class(&owner, "biology-101").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = app.router.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let mut teacher = Client::connect(address, Some(&owner)).await;
+    let expires = chrono::Utc::now() + chrono::Duration::seconds(1);
+    sqlx::query("UPDATE teacher_sessions SET expires_at = ? WHERE token = ?")
+        .bind(expires.to_rfc3339_opts(chrono::SecondsFormat::Micros, false))
+        .bind(owner.strip_prefix("teacher_session=").unwrap())
+        .execute(&app.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        teacher
+            .command(json!(["join_teacher_class", "biology-101"]))
+            .await["status"],
+        "ok"
+    );
+    teacher.event("teacher_stats").await;
+    assert_eq!(
+        teacher.event("teacher_access_ended").await["reason"],
+        "expired"
+    );
+    assert_eq!(
+        teacher
+            .command(json!(["join_teacher_class", "biology-101"]))
+            .await,
+        json!({"status": "error", "reason": "expired"})
+    );
+    teacher.no_event().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn logout_racing_with_subscription_leaves_no_authorized_watcher() {
+    let app = TestApp::new().await;
+    let owner = app.signup("owner@test.com").await;
+    app.create_class(&owner, "biology-101").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = app.router.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let mut teacher = Client::connect(address, Some(&owner)).await;
+    let (subscription, logout) = tokio::join!(
+        teacher.command(json!(["join_teacher_class", "biology-101"])),
+        app.request("POST", "/teacher/logout", Some(&owner), ""),
+    );
+    assert_eq!(logout.status, 303);
+    match subscription["status"].as_str().unwrap() {
+        "ok" => {
+            teacher.event("teacher_stats").await;
+            assert_eq!(
+                teacher.event("teacher_access_ended").await["reason"],
+                "revoked"
+            );
+        }
+        "error" => assert_eq!(subscription["reason"], "unauthenticated"),
+        status => panic!("unexpected subscription result: {status}"),
+    }
+    assert_eq!(
+        teacher
+            .command(json!(["join_teacher_class", "biology-101"]))
+            .await,
+        json!({"status": "error", "reason": "unauthenticated"})
+    );
+    let cookie = app.request("GET", "/biology-101", None, "").await.cookie();
+    let mut student = Client::connect(address, Some(&cookie)).await;
+    student
+        .command(json!(["register_student", 1.0, "biology-101"]))
+        .await;
+    teacher.no_event().await;
+    server.abort();
 }

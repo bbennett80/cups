@@ -29,7 +29,7 @@ pub(crate) fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false)
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct Teacher {
     pub id: i64,
     pub email: String,
@@ -41,21 +41,28 @@ pub(crate) struct Class {
     pub created_at: String,
 }
 
-pub(crate) async fn teacher_by_token(
+pub(crate) struct SessionRecord {
+    pub teacher: Teacher,
+    pub expires_at: String,
+}
+
+pub(crate) async fn session_by_token(
     db: &SqlitePool,
     token: &str,
-) -> Result<Option<Teacher>, sqlx::Error> {
+) -> Result<Option<SessionRecord>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT t.id, t.email FROM teacher_sessions ts JOIN teachers t ON t.id = ts.teacher_id
-         WHERE ts.token = ? AND julianday(ts.expires_at) > julianday(?)",
+        "SELECT t.id, t.email, ts.expires_at FROM teacher_sessions ts JOIN teachers t ON t.id = ts.teacher_id
+         WHERE ts.token = ?",
     )
     .bind(token)
-    .bind(now())
     .fetch_optional(db)
     .await?;
-    Ok(row.map(|r| Teacher {
-        id: r.get("id"),
-        email: r.get("email"),
+    Ok(row.map(|r| SessionRecord {
+        teacher: Teacher {
+            id: r.get("id"),
+            email: r.get("email"),
+        },
+        expires_at: r.get("expires_at"),
     }))
 }
 

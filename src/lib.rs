@@ -1,5 +1,7 @@
 mod auth;
+mod classroom;
 mod db;
+mod forms;
 mod http;
 mod realtime;
 
@@ -21,6 +23,7 @@ pub(crate) struct AppState {
     db: SqlitePool,
     templates: Arc<Environment<'static>>,
     live: Arc<Mutex<realtime::LiveState>>,
+    auth_gate: Arc<Mutex<()>>,
     style_version: u64,
 }
 
@@ -28,6 +31,9 @@ pub(crate) struct AppState {
 pub async fn app(db_path: &Path, asset_root: &Path) -> anyhow::Result<Router> {
     let db = db::open(db_path).await?;
     let mut templates = Environment::new();
+    templates.add_filter("urlencode", |value: String| {
+        urlencoding::encode(&value).into_owned()
+    });
     templates.set_loader(minijinja::path_loader(asset_root.join("templates")));
     // Fail at startup if a required template is missing or invalid.
     for name in [
@@ -54,8 +60,10 @@ pub async fn app(db_path: &Path, asset_root: &Path) -> anyhow::Result<Router> {
         db,
         templates: Arc::new(templates),
         live: Arc::default(),
+        auth_gate: Arc::default(),
         style_version,
     };
+    realtime::start_expiry_clock(&state.live);
     let (layer, io) = SocketIo::new_layer();
     let socket_state = state.clone();
     io.ns("/", move |socket: SocketRef| {

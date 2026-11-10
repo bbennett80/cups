@@ -14,6 +14,8 @@ async fn public_pages_static_files_and_student_cookie() {
         "/static/styles.css",
         "/static/favicon.ico",
         "/static/cups.jpg",
+        "/static/app.mjs",
+        "/static/state-machines.mjs",
     ] {
         let reply = app.request("GET", uri, None, "").await;
         assert_eq!(reply.status, StatusCode::OK, "{uri}: {}", reply.body);
@@ -21,11 +23,14 @@ async fn public_pages_static_files_and_student_cookie() {
     let reply = app.request("GET", "/biology-101", None, "").await;
     let cookie = reply.cookie();
     assert!(cookie.starts_with("student_id="));
+    assert!(reply.body.contains("data-page=\"student\""));
+    assert!(reply.body.contains("role=\"status\""));
     assert!(
         reply
             .body
-            .contains("socket.emit('register_student', timestamp, class_id)")
+            .contains("data-color=\"green\" aria-pressed=\"false\" disabled")
     );
+    assert!(reply.body.contains("/static/app.mjs?v="));
     let reply = app
         .request("GET", "/chemistry-101", Some(&cookie), "")
         .await;
@@ -289,5 +294,89 @@ async fn redirects_stay_on_site() {
             )
             .await;
         assert_eq!(reply.location(), "/teacher/dashboard");
+    }
+}
+
+#[tokio::test]
+async fn rejected_forms_preserve_input_and_encode_nested_return_paths() {
+    let app = TestApp::new().await;
+    let next = "/biology-101/teacher?filter=red&sort=name";
+    let rejected = app
+        .request(
+            "POST",
+            "/teacher/signup",
+            None,
+            &form(&[
+                ("email", "teacher@test.com"),
+                ("password", "short"),
+                ("password_confirm", "short"),
+                ("next_path", next),
+            ]),
+        )
+        .await;
+    assert_eq!(rejected.status, StatusCode::BAD_REQUEST);
+    assert!(rejected.body.contains("data-state=\"rejected\""));
+    assert!(rejected.body.contains("value=\"teacher@test.com\""));
+    assert!(rejected.body.contains("role=\"alert\""));
+    assert!(!rejected.body.contains("value=\"short\""));
+    assert!(
+        rejected.body.contains("filter%3Dred%26sort%3Dname"),
+        "{}",
+        rejected.body
+    );
+    let cookie = app.signup("teacher@test.com").await;
+    let rejected = app.create_class(&cookie, "invalid class").await;
+    assert!(rejected.body.contains("value=\"invalid class\""));
+    assert!(rejected.body.contains("data-state=\"rejected\""));
+}
+
+#[tokio::test]
+async fn session_failure_rolls_back_account_creation_and_allows_retry() {
+    let app = TestApp::new().await;
+    sqlx::raw_sql("CREATE TRIGGER fail_session BEFORE INSERT ON teacher_sessions BEGIN SELECT RAISE(ABORT, 'test failure'); END;")
+        .execute(&app.db).await.unwrap();
+    let body = form(&[
+        ("email", "retry@test.com"),
+        ("password", "testing123"),
+        ("password_confirm", "testing123"),
+    ]);
+    let failed = app.request("POST", "/teacher/signup", None, &body).await;
+    assert_eq!(failed.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(!failed.headers.contains_key("set-cookie"));
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM teachers")
+        .fetch_one(&app.db)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    sqlx::query("DROP TRIGGER fail_session")
+        .execute(&app.db)
+        .await
+        .unwrap();
+    let retried = app.request("POST", "/teacher/signup", None, &body).await;
+    assert_eq!(retried.status, StatusCode::SEE_OTHER);
+    assert!(retried.cookie().starts_with("teacher_session="));
+}
+
+#[tokio::test]
+async fn concurrent_signups_have_one_account_and_one_session() {
+    let app = TestApp::new().await;
+    let body = form(&[
+        ("email", "duplicate@test.com"),
+        ("password", "testing123"),
+        ("password_confirm", "testing123"),
+    ]);
+    let (first, second) = tokio::join!(
+        app.request("POST", "/teacher/signup", None, &body),
+        app.request("POST", "/teacher/signup", None, &body),
+    );
+    let mut statuses = [first.status.as_u16(), second.status.as_u16()];
+    statuses.sort();
+    assert_eq!(statuses, [303, 400]);
+    for table in ["teachers", "teacher_sessions"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&app.db)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

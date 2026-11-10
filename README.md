@@ -21,7 +21,13 @@ cargo build --release --locked
 ./target/release/cups
 ```
 
-Templates and static files are loaded from disk; keep `templates/` and `static/` alongside the application, or set `ASSET_ROOT`. Python is no longer required. `Cargo.lock` pins the dependency versions.
+Templates and static files are loaded from disk; keep `templates/` and `static/` alongside the application, or set `ASSET_ROOT`. `Cargo.lock` pins the dependency versions.
+
+### Dependencies
+
+This Rust branch does not need `.venv`, a Python interpreter, pip packages, or a Python test runner. Cargo manages backend dependencies and writes build artifacts to `target/`. Node is needed only to run the browser tests; there is no npm install or frontend build step.
+
+An existing `.venv/` or `__pycache__/` is left over from the Python app and is ignored by Git. You can remove those directories if you no longer use the `fastapi-port` branch; removing them does not affect the Rust app or `teachers.db`.
 
 ## Configuration
 
@@ -54,6 +60,7 @@ The existing Socket.IO 4.x browser client and event format are preserved:
 | Teacher → server | `join_teacher_class` | `class_id` |
 | Server → teacher | `teacher_stats` | `{class_id, student_count, active_student_count, color2frac}` |
 | Server → student | `deactivate_old_tabs` | `{student_id, timestamp}` |
+| Server → teacher | `teacher_access_ended` | `{reason}` when the live session expires or is revoked |
 
 Both HTTP polling and WebSocket transports work. Teacher subscriptions require a valid session and class ownership. Signing out also removes that session's live subscriptions. A student's newest tab replaces their previous registration, resets their color to inactive, and updates both classes if they switch. Counts include each connected student cookie once, and color fractions use active students as the denominator. Invalid colors are ignored. Class names follow the UI's 3–40 character constraint: lowercase letters, numbers, and interior hyphens.
 
@@ -82,7 +89,21 @@ As before, live student state is in memory and resets on restart. Run one applic
 - SQLx: asynchronous SQLite access
 - Tower HTTP: static files and request tracing
 
-`src/http.rs` handles pages and forms, `src/auth.rs` handles passwords and sessions, `src/db.rs` and `src/schema.sql` handle persistence, and `src/realtime.rs` manages live classroom state. `src/main.rs` configures and serves the application.
+`src/http.rs` handles pages and forms, `src/auth.rs` handles passwords and sessions, and `src/db.rs` and `src/schema.sql` handle persistence. `src/classroom.rs` is the pure classroom state machine; `src/realtime.rs` adapts Socket.IO commands and effects. `static/state-machines.mjs` defines browser transitions and `static/app.mjs` renders them. `src/main.rs` configures and serves the application.
+
+## State and reliability in Rust
+
+The refactor makes application behavior explicit through Rust enums and guarded transitions:
+
+- **Typed classroom behavior:** `StudentState`, `TeacherState`, and `Feedback` define participation and subscription states. Commands enter through `Classroom::transition(event, now)` and return typed outcomes and effects. Duplicate registration preserves feedback, superseded tabs cannot regain control, and an old tab disconnecting cannot remove its replacement.
+- **Separation of behavior and I/O:** the classroom model performs no network or database operations and reads no clock. The Socketioxide adapter authorizes requests, applies transitions under a Tokio mutex, and delivers effects. This makes event ordering and expiry boundaries reproducible in tests.
+- **Consistent authentication:** `SessionState` distinguishes missing, invalid, expired, and authenticated sessions. `ClassAccess` supplies the same ownership decision to HTTP pages and Socket.IO subscriptions. An authorization gate serializes subscription changes with logout, and expiry checks stop idle sessions from retaining live subscriptions.
+- **Atomic account creation:** SQLx saves a new teacher and their initial session in one SQLite transaction. A session failure rolls back the account, and the session cookie is issued only after commit. Users can retry without encountering a partially created account.
+- **Responsive request handling:** password hashing and verification run through Tokio's `spawn_blocking`, keeping PBKDF2 work off asynchronous request workers. SQLite access uses SQLx's asynchronous pool.
+
+The browser uses matching explicit reducers for connection, submission, theme, and QR states. Students see server-confirmed feedback, teachers see when counts are stale, and rejected forms retain email or class input. Submit buttons prevent duplicate submissions, and the QR modal handles loading failures and keyboard focus.
+
+For developers and agents, the [state-machine map](docs/state-machines.md) inventories 18 stateful flows with diagrams, guards, invariants, protocol contracts, and change recipes. Typed events and effects give backend changes a clear entry point; browser `data-state` attributes make UI state inspectable. No state-machine framework or additional runtime service is required.
 
 ## Verify
 
@@ -90,6 +111,9 @@ As before, live student state is in memory and resets on restart. Run one applic
 cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
+node --test tests/browser/*.test.mjs
 ```
 
 Tests use temporary databases and cover HTTP pages and assets, authentication errors, ownership, redirects, legacy Python passwords/sessions, expiration, logout, and Socket.IO polling/WebSocket flows including colors, counts, class switching, and old-tab deactivation. The WebSocket test binds an ephemeral loopback port. Tests do not modify your local `teachers.db`.
+
+`bash scripts/check.sh` runs all checks. Node is required only for browser-state tests; the application still runs with Rust alone. Model and browser tests also cover reconnect/acknowledgement races, idempotent transitions, terminal states, session expiry, atomic signup rollback, and concurrent signups.

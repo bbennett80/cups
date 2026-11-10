@@ -204,7 +204,8 @@ path.red {
   max-width: 660px;
 }
 
-p {
+p,
+.feedback-choice {
   margin: 0 0 0.9rem;
   padding: 0.95rem 1rem;
   border-radius: 12px;
@@ -236,49 +237,57 @@ code {
 
 p.green,
 p.yellow,
-p.red {
+p.red,
+.feedback-choice {
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
 p.green:hover,
 p.yellow:hover,
-p.red:hover {
+p.red:hover,
+.feedback-choice:enabled:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 20px -16px rgba(18, 29, 47, 0.8);
 }
 
-p.green {
+p.green,
+.feedback-choice.green {
   background: var(--status-green-bg);
   border-color: var(--status-green-border);
   color: var(--status-green-text);
 }
 
-p.yellow {
+p.yellow,
+.feedback-choice.yellow {
   background: var(--status-yellow-bg);
   border-color: var(--status-yellow-border);
   color: var(--status-yellow-text);
 }
 
-p.red {
+p.red,
+.feedback-choice.red {
   background: var(--status-red-bg);
   border-color: var(--status-red-border);
   color: var(--status-red-text);
 }
 
-:root[data-theme="dark"] p.green {
+:root[data-theme="dark"] p.green,
+:root[data-theme="dark"] .feedback-choice.green {
   background: #203829;
   border-color: #2f6f43;
   color: #ffffff;
 }
 
-:root[data-theme="dark"] p.yellow {
+:root[data-theme="dark"] p.yellow,
+:root[data-theme="dark"] .feedback-choice.yellow {
   background: #6c5610;
   border-color: #9c7d18;
   color: #ffffff;
 }
 
-:root[data-theme="dark"] p.red {
+:root[data-theme="dark"] p.red,
+:root[data-theme="dark"] .feedback-choice.red {
   background: #7a242a;
   border-color: #aa3944;
   color: #ffffff;
@@ -666,6 +675,24 @@ h1 {
   opacity: 0;
   transform: rotate(35deg) scale(0.72);
 }
+
+[hidden] { display: none !important; }
+
+.feedback-choice {
+  display: block;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+}
+
+.feedback-choice:disabled { opacity: 0.65; cursor: default; }
+.feedback-choice[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 2px; }
+button:focus-visible, a:focus-visible { outline: 3px solid var(--field-focus-outline); outline-offset: 3px; }
+button:disabled { cursor: wait; }
+.connection-status { padding: 0.5rem 0; background: transparent; border: 0; color: var(--muted); font-size: 0.9rem; }
+[data-page="teacher"]:not([data-state="live"]) .traffic-stack,
+[data-page="teacher"]:not([data-state="live"]) .stats { opacity: 0.55; }
+[data-reload], [data-reconnect-action] { display: inline-block; margin-bottom: 1rem; }
 
 @media only screen and (max-width: 640px) {
   body {

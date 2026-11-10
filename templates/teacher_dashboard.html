@@ -8,10 +8,10 @@
   </div>
 
   {% if error %}
-  <div class="form-error">{{ error }}</div>
+  <div class="form-error" role="alert">{{ error }}</div>
   {% endif %}
 
-  <form method="post" action="/teacher/classes" class="class-create-form">
+  <form method="post" action="/teacher/classes" class="class-create-form" data-state="{{ form_state }}">
     <label for="class_name">Class URL Name</label>
     <div class="class-create-row">
       <input
@@ -23,6 +23,7 @@
         maxlength="40"
         pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]"
         placeholder="biology-101"
+        value="{{ class_name or '' }}"
       >
       <button type="submit">Create Class</button>
     </div>
@@ -59,60 +60,18 @@
   </section>
 </div>
 
-<div id="qr_modal" class="modal" aria-hidden="true">
+<div id="qr_modal" class="modal" aria-hidden="true" data-state="closed">
   <div class="modal-backdrop" data-close-modal="true"></div>
   <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="qr_modal_title">
     <button type="button" class="modal-close" id="close_qr_modal" aria-label="Close">×</button>
     <h2 id="qr_modal_title">Student QR Code</h2>
     <p id="qr_modal_subtitle" class="helper-text"></p>
+    <p id="qr_status" class="helper-text" role="status" aria-live="polite"></p>
     <div class="qr-box">
-      <img id="qr_image" alt="Student class QR code">
+      <img id="qr_image" alt="Student class QR code" hidden>
     </div>
     <a id="qr_student_url" href="#" target="_blank" rel="noopener noreferrer"></a>
   </div>
 </div>
 
-<script>
-  document.addEventListener("DOMContentLoaded", function() {
-    let modal = document.getElementById("qr_modal");
-    let closeButton = document.getElementById("close_qr_modal");
-    let qrImage = document.getElementById("qr_image");
-    let subtitle = document.getElementById("qr_modal_subtitle");
-    let studentUrlLink = document.getElementById("qr_student_url");
-
-    function closeModal() {
-      modal.classList.remove("open");
-      modal.setAttribute("aria-hidden", "true");
-    }
-
-    function openModal(className, studentUrl) {
-      subtitle.textContent = "Class: " + className;
-      studentUrlLink.textContent = studentUrl;
-      studentUrlLink.href = studentUrl;
-      qrImage.src = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(studentUrl);
-      modal.classList.add("open");
-      modal.setAttribute("aria-hidden", "false");
-    }
-
-    document.querySelectorAll(".student-qr-trigger").forEach(function(button) {
-      button.addEventListener("click", function() {
-        let className = button.dataset.className || "";
-        let studentUrl = button.dataset.studentUrl || "";
-        openModal(className, studentUrl);
-      });
-    });
-
-    closeButton.addEventListener("click", closeModal);
-    modal.addEventListener("click", function(event) {
-      if (event.target && event.target.dataset.closeModal === "true") {
-        closeModal();
-      }
-    });
-    document.addEventListener("keydown", function(event) {
-      if (event.key === "Escape" && modal.classList.contains("open")) {
-        closeModal();
-      }
-    });
-  });
-</script>
 {% endblock %}
