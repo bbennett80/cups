@@ -1,0 +1,35 @@
+[package]
+name = "cups"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+axum-extra = { version = "0.12", features = ["cookie"] }
+base64 = "0.22"
+chrono = "0.4"
+hex = "0.4"
+minijinja = { version = "2", features = ["loader"] }
+pbkdf2 = "0.12"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+socketioxide = { version = "0.18", features = ["tracing"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+subtle = "2"
+time = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+urlencoding = "2"
+
+[dev-dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+http-body-util = "0.1"
+tempfile = "3"
+tokio-tungstenite = "0.30"
+tower = { version = "0.5", features = ["util"] }

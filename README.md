@@ -1,89 +1,95 @@
-# fastcups
+# Runnercups
 
-FastAPI + Socket.IO classroom feedback app.
+Rust/Axum classroom feedback app, ported from the `fastapi-port` branch.
 
-Teachers create unique class URLs, students select a status color (green/yellow/red), and teacher views update live.
+Teachers create unique class URLs, students select a status color (green/yellow/red), and teacher views update live. The existing UI includes light/dark mode, QR code sharing, teacher accounts, and a class dashboard.
 
-## Current functionality
+## Run
 
-- Teacher authentication:
-  - Sign up, sign in, and sign out
-  - Session cookie-based auth
-- Teacher dashboard:
-  - Create class URLs
-  - Class URLs are globally unique across all teachers
-  - List your classes with quick links
-- Teacher classroom view:
-  - Real-time updates (no polling reload) for:
-    - Active student count
-    - Connected student count
-    - Green/yellow/red distribution
-- Student view:
-  - One-click green/yellow/red status update
-  - Single active-tab behavior per student cookie
-- Sharing:
-  - Dashboard `Student Link` opens a modal with a QR code for the class URL
-- UI:
-  - Global light/dark mode toggle (persisted in browser local storage)
-
-## Tech stack
-
-- FastAPI
-- python-socketio (ASGI server mode)
-- Jinja2 templates
-- SQLite (teacher accounts, sessions, classes)
-
-## Requirements
-
-- Python 3.12+ recommended
-
-Dependencies are pinned in `requirements.txt`.
-
-## Setup
-
-### Option A (recommended): `uv`
+Install a current stable Rust toolchain (tested with Rust 1.96), then run from the project root:
 
 ```bash
-uv venv .venv
-uv pip install --python .venv/bin/python -r requirements.txt
+cargo run --locked
 ```
 
-Run:
+Open <http://127.0.0.1:8000>. Create a teacher account, create a class such as `biology-101`, and share its student link. Keep `/biology-101/teacher` open to see feedback.
+
+For a release build:
 
 ```bash
-uv run --python .venv/bin/python uvicorn main:app --reload
+cargo build --release --locked
+./target/release/cups
 ```
 
-### Option B: standard venv + pip
+Templates and static files are loaded from disk; keep `templates/` and `static/` alongside the application, or set `ASSET_ROOT`. Python is no longer required. `Cargo.lock` pins the dependency versions.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Bind address; use `0.0.0.0` to listen on all interfaces |
+| `PORT` | `8000` | HTTP port |
+| `DB_PATH` | `teachers.db` | SQLite database file, created if missing |
+| `ASSET_ROOT` | `.` | Directory containing `templates/` and `static/` |
+| `RUST_LOG` | `cups=info,tower_http=info` | Tracing filter |
+
+For example:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload
+HOST=0.0.0.0 PORT=3000 DB_PATH=/var/lib/cups/teachers.db cargo run --release --locked
 ```
 
-## App routes
+The database's parent directory must already exist and be writable. Behind an HTTPS reverse proxy, preserve `Host`, set `X-Forwarded-Proto: https`, and forward `/socket.io/` with support for both polling and WebSocket upgrades. The proxy should overwrite incoming `X-Forwarded-Proto` headers. The server shuts down gracefully on Ctrl+C or SIGTERM.
 
-Public:
+## Compatibility with the FastAPI app
 
-- `/` home / usage overview
-- `/{class_id}` student class page
+The Rust app opens the same `teachers.db` schema. Existing teacher accounts, classes, PBKDF2-SHA256 password hashes, and unexpired `teacher_session` cookies continue to work without migration. New password hashes retain Python's `pbkdf2_sha256$iterations$salt$digest` format and 200,000 iterations. Teacher session cookies remain HttpOnly, SameSite=Lax, and valid for 30 days.
 
-Teacher auth:
+The existing Socket.IO 4.x browser client and event format are preserved:
 
-- `/teacher/signup` (GET/POST)
-- `/teacher/signin` (GET/POST)
-- `/teacher/logout` (POST)
+| Direction | Event | Arguments |
+| --- | --- | --- |
+| Student → server | `register_student` | `timestamp, class_id` (two arguments) |
+| Student → server | `color_change` | `"green"`, `"yellow"`, `"red"`, or `"inactive"` |
+| Teacher → server | `join_teacher_class` | `class_id` |
+| Server → teacher | `teacher_stats` | `{class_id, student_count, active_student_count, color2frac}` |
+| Server → student | `deactivate_old_tabs` | `{student_id, timestamp}` |
 
-Teacher app:
+Both HTTP polling and WebSocket transports work. Teacher subscriptions require a valid session and class ownership. Signing out also removes that session's live subscriptions. A student's newest tab replaces their previous registration, resets their color to inactive, and updates both classes if they switch. Counts include each connected student cookie once, and color fractions use active students as the denominator. Invalid colors are ignored. Class names follow the UI's 3–40 character constraint: lowercase letters, numbers, and interior hyphens.
 
-- `/teacher/dashboard` teacher dashboard
-- `/teacher/classes` create class (POST)
-- `/{class_id}/teacher` teacher live view (owner only)
+As before, live student state is in memory and resets on restart. Run one application process; multiple instances would need shared live state. Accounts, sessions, and classes persist in SQLite. The UI still loads the Socket.IO client from cdnjs and QR images from api.qrserver.com.
 
-## Notes
+## Routes
 
-- The app creates `teachers.db` in the project root on first run.
-- Teacher pages are protected and class ownership is enforced.
-- Existing in-memory student state resets when the process restarts.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/` | Usage overview |
+| GET | `/{class_id}` | Student class page |
+| GET, POST | `/teacher/signup` | Teacher registration |
+| GET, POST | `/teacher/signin` | Teacher sign in |
+| POST | `/teacher/logout` | Sign out |
+| GET | `/teacher/dashboard` | Teacher's classes |
+| POST | `/teacher/classes` | Create a globally unique class URL |
+| GET | `/{class_id}/teacher` | Live teacher view (owner only) |
+| GET | `/static/{path}` | Styles and images |
+| GET, POST | `/socket.io/` | Socket.IO transport |
+
+## Implementation
+
+- [Axum](https://github.com/tokio-rs/axum) and Tokio: HTTP routes and runtime
+- [Socketioxide](https://github.com/Totodore/socketioxide): Socket.IO server
+- MiniJinja: existing Jinja-compatible HTML templates
+- SQLx: asynchronous SQLite access
+- Tower HTTP: static files and request tracing
+
+`src/http.rs` handles pages and forms, `src/auth.rs` handles passwords and sessions, `src/db.rs` and `src/schema.sql` handle persistence, and `src/realtime.rs` manages live classroom state. `src/main.rs` configures and serves the application.
+
+## Verify
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```
+
+Tests use temporary databases and cover HTTP pages and assets, authentication errors, ownership, redirects, legacy Python passwords/sessions, expiration, logout, and Socket.IO polling/WebSocket flows including colors, counts, class switching, and old-tab deactivation. The WebSocket test binds an ephemeral loopback port. Tests do not modify your local `teachers.db`.

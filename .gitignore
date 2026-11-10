@@ -4,4 +4,7 @@ __pycache__
 .venv/
 .vscode
 teachers.db
+teachers.db-shm
+teachers.db-wal
+/target/
 

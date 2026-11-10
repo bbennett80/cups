@@ -18,17 +18,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Runnercups</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v={{ style_version }}">
-    <link rel="shortcut icon" href="{{ url_for('static', path='/favicon.ico') }}">
+    <link rel="stylesheet" href="/static/styles.css?v={{ style_version }}">
+    <link rel="shortcut icon" href="/static/favicon.ico">
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@fastdotai" />
     <meta name="twitter:creator" content="@jeremyphoward" />
-    <meta name="twitter:image" content="{{ url_for("static", path="cups.jpg") }}" />
+    <meta name="twitter:image" content="{{ request.base_url }}static/cups.jpg" />
     <meta property="og:url" content="https://cups.fast.ai/" />
     <meta property="og:title" content="Runnercups - stay in sync with your students" />
     <meta property="og:description" content="Making sure your students are able to follow along as you teach is important - Runnercups can help!" />
-    <meta property="og:image" content="{{ url_for("static", path="cups.jpg") }}" />
+    <meta property="og:image" content="{{ request.base_url }}static/cups.jpg" />
   </head>
   <body>
     <header class="topbar">
